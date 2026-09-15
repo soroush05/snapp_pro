@@ -9,7 +9,7 @@ public final class PersianText {
         return s.trim().toLowerCase(Locale.ROOT)
                 .replace('ي','ی').replace('ك','ک')
                 .replace("‌", " ").replaceAll("[ًٌٍَُِّْـ]", "")
-                .replaceAll("\s+", " ");
+                .replaceAll("\\s+", " ");
     }
     public static boolean hasAny(String s, String... xs) {
         String n = norm(s);
