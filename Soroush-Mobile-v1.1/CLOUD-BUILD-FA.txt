@@ -1,0 +1,15 @@
+Soroush Mobile - Cloud Build (بدون Android Studio)
+
+1) یک repository جدید در GitHub بساز.
+2) تمام محتوای این پوشه را داخل repository آپلود کن.
+3) وارد تب Actions شو.
+4) Workflow با نام "Build Soroush Android APK" را باز کن.
+5) Run workflow را بزن.
+6) بعد از پایان Build، در پایین همان صفحه قسمت Artifacts فایل
+   Soroush-Mobile-debug-apk
+   را دانلود کن.
+7) فایل ZIP دانلودشده را باز کن؛ app-debug.apk داخل آن است.
+8) APK را روی گوشی Android نصب کن.
+9) در Settings > Accessibility سرویس Soroush Agent را فعال کن.
+
+نکته: این APK برای تست شخصی Debug است و نیاز به انتشار در Play Store ندارد.

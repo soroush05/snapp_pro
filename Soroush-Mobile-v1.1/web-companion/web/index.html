@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <meta name="description" content="Soroush Agent - دستیار فارسی برای درخواست سفر و مدیریت مکان‌ها" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="styles.css?v=440" />
+  <title>Soroush Agent Web</title>
+</head>
+<body>
+  <noscript><div style="padding:24px;font-family:Segoe UI,sans-serif">JavaScript is disabled. Please enable JavaScript.</div></noscript>
+  <div class="appShell">
+    <aside class="sidePanel" id="sidePanel">
+      <div class="brand">
+        <div class="logo">S</div>
+        <div><strong>Soroush Agent</strong><span>نسخه وب</span></div>
+      </div>
+
+      <button class="primary wide" id="newPlaceBtn">＋ افزودن موقعیت</button>
+
+      <section class="sideSection">
+        <div class="sectionHead"><h2>موقعیت‌های من</h2><span id="placeCount">۰</span></div>
+        <div id="placeList" class="placeList"></div>
+      </section>
+
+      <section class="sideSection seniorBox">
+        <div class="sectionHead"><h2>پرداخت خودکار</h2><label class="switch"><input id="seniorToggle" type="checkbox"/><span></span></label></div>
+      </section>
+    </aside>
+
+    <main class="mainPanel">
+      <header class="topbar">
+        <button class="iconBtn mobileOnly" id="menuBtn" aria-label="منو">☰</button>
+        <div><h1>چه کاری برات انجام بدم؟</h1><p>طبیعی بنویس؛ لازم نیست جمله خاصی حفظ کنی.</p></div>
+        <button class="ghost" id="installBtn" hidden>نصب</button>
+      </header>
+
+      <section class="chat" id="chat" aria-live="polite"></section>
+
+      <div class="suggestions" id="suggestions">
+        <button data-text="اسنپ بگیر به خونه علی">اسنپ بگیر به خونه علی</button>
+        <button data-text="سلام عزیزم ماشین میخوام">سلام عزیزم ماشین میخوام</button>
+        <button data-text="هزینه رو پرداخت کن">هزینه رو پرداخت کن</button>
+      </div>
+
+      <form class="composer" id="composer">
+        <textarea id="messageInput" rows="1" placeholder="مثلاً: اسنپ میخوام به آرایشگاه نیلوفر"></textarea>
+        <button type="submit" class="sendBtn" aria-label="ارسال">➤</button>
+      </form>
+    </main>
+  </div>
+
+  <div class="overlay hidden" id="placeOverlay" aria-hidden="true">
+    <section class="sheet">
+      <div class="sheetHead"><div><h2>تعریف موقعیت</h2><p>اسم دلخواه بده و نقطه را روی نقشه مشخص کن.</p></div><button class="iconBtn" id="closePlace">✕</button></div>
+      <div class="formGrid">
+        <label>نام موقعیت<input id="placeName" placeholder="مثلاً خانه، خانه علی، محل کار" /></label>
+        <label>نام‌های دیگر<input id="placeAliases" placeholder="مثلاً خونه علی، منزل علی" /></label>
+      </div>
+      <div class="searchRow">
+        <input id="mapSearchInput" placeholder="آدرس، خیابان یا نام مکان را جست‌وجو کن" />
+        <button class="primary" id="mapSearchBtn">جست‌وجو</button>
+        <button class="secondary" id="mapMyLocationBtn">📍 موقعیت من</button>
+      </div>
+      <div id="searchContext" class="searchContext">تمرکز جست‌وجو: تهران</div>
+      <div id="mapSearchResults" class="mapResults"></div>
+      <div id="map"></div>
+      <label class="addressLabel">آدرس انتخاب‌شده<textarea id="placeAddress" rows="2" placeholder="بعد از انتخاب نقطه پر می‌شود"></textarea></label>
+      <div class="sheetActions"><button class="primary" id="savePlaceBtn">ذخیره موقعیت</button></div>
+    </section>
+  </div>
+
+
+  <div class="overlay hidden" id="confirmOverlay" aria-hidden="true">
+    <section class="sheet confirmSheet">
+      <div class="sheetHead"><div><h2 id="confirmTitle">تأیید موقعیت</h2><p id="confirmSubtitle">نقطه را روی نقشه بررسی کن.</p></div><button class="iconBtn" id="closeConfirm">✕</button></div>
+      <div id="confirmMap"></div>
+      <div class="confirmAddressBox"><strong>آدرس تشخیص‌داده‌شده</strong><p id="confirmAddress"></p><small>اگر نقطه دقیق نیست، روی محل درست در نقشه بزن.</small></div>
+      <div class="sheetActions confirmActions"><button class="primary" id="confirmYes">بله، همین موقعیت است</button><button class="secondary" id="confirmEdit">نه، اصلاح می‌کنم</button></div>
+    </section>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="app.js?v=440"></script>
+</body>
+</html>

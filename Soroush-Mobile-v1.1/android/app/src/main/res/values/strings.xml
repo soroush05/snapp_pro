@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Soroush Agent</string>
+    <string name="accessibility_desc">به Soroush Agent اجازه می‌دهد برای استفاده شخصی شما رابط Snapp را جهت درخواست، لغو و پرداخت سفر کنترل کند. عملیات حساس فقط بعد از فرمان/تأیید شما اجرا می‌شوند.</string>
+</resources>
