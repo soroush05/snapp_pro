@@ -35,7 +35,7 @@ jobs:
       - name: Build signed APK
         working-directory: Soroush-Mobile-v1.1/android
         env:
-          KEYSTORE_FILE: app/soroush-release.jks
+          KEYSTORE_FILE: soroush-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
