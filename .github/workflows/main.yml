@@ -25,17 +25,25 @@ jobs:
       - name: Install Android SDK 35
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          echo "Using sdkmanager at: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build APK
+      - name: Restore keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > Soroush-Mobile-v1.1/android/app/soroush-release.jks
+
+      - name: Build signed APK
         working-directory: Soroush-Mobile-v1.1/android
+        env:
+          KEYSTORE_FILE: app/soroush-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Soroush-Mobile-debug-apk
+          name: Soroush-Mobile-signed-apk
           path: Soroush-Mobile-v1.1/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
