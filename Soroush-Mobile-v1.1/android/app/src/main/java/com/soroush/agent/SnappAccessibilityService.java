@@ -12,6 +12,7 @@ public class SnappAccessibilityService extends AccessibilityService {
     private final Handler h = new Handler(Looper.getMainLooper());
     private AgentCommand active;
     private int stage = 0;
+    private boolean originConfirmed = false;
     private long startedAt = 0;
     private String lastSnapshot = "";
 
@@ -21,7 +22,7 @@ public class SnappAccessibilityService extends AccessibilityService {
         if (!pkg.startsWith("cab.snapp.passenger")) return;
         AgentCommand p = SnappBridge.getPending();
         if (p == null) return;
-        if (active != p) { active = p; stage = 0; startedAt = System.currentTimeMillis(); }
+        if (active != p) { active = p; stage = 0; originConfirmed = false; startedAt = System.currentTimeMillis(); }
         h.removeCallbacks(stepper);
         h.postDelayed(stepper, 350);
     }
@@ -49,10 +50,27 @@ public class SnappAccessibilityService extends AccessibilityService {
 
     private boolean requestRide(AccessibilityNodeInfo root) {
         if (stage == 0) {
-            AccessibilityNodeInfo n = findAny(root, "انتخاب مقصد", "مقصد", "کجا می روید", "کجا می‌روید", "کجا میرید", "کجا می‌رید");
+            // Snapp may first open on the Super App home screen. Enter the ride service
+            // explicitly before looking for the origin/destination flow. We only match
+            // an exact service label to avoid clicking the global search bar or other
+            // text containing the word Snapp.
+            AccessibilityNodeInfo rideService = findExactAny(root, "اسنپ", "اسنپ خودرو", "تاکسی اینترنتی");
+            if (rideService != null && click(rideService)) {
+                SnappBridge.status("سرویس اسنپ باز شد؛ در حال آماده‌سازی سفر…");
+                retrySlow(); return true;
+            }
+
+            // Snapp often opens on the origin confirmation screen next.
+            AccessibilityNodeInfo confirmOrigin = findAny(root, "تایید مبدا", "تأیید مبدا", "تایید مبدأ", "تأیید مبدأ", "ثبت مبدا", "ثبت مبدأ");
+            if (confirmOrigin != null && click(confirmOrigin)) {
+                originConfirmed=true;
+                SnappBridge.status("مبدأ فعلی در Snapp تأیید شد؛ در حال رفتن به مقصد…");
+                retrySlow(); return true;
+            }
+            AccessibilityNodeInfo n = findAny(root, "انتخاب مقصد", "مقصد کجاست", "مقصد", "کجا می روید", "کجا می‌روید", "کجا میرید", "کجا می‌رید", "کجا؟");
             if (n != null && click(n)) { stage=1; SnappBridge.status("صفحه انتخاب مقصد باز شد."); retryFast(); return true; }
             AccessibilityNodeInfo edit = firstEditable(root);
-            if (edit != null) { stage=1; return true; }
+            if (edit != null) { stage=1; retryFast(); return true; }
             return false;
         }
         if (stage == 1) {
@@ -117,6 +135,18 @@ public class SnappAccessibilityService extends AccessibilityService {
             return false;
         }
         return false;
+    }
+
+    private AccessibilityNodeInfo findExactAny(AccessibilityNodeInfo root, String... needles) {
+        List<AccessibilityNodeInfo> all = flatten(root);
+        for (String needle : needles) {
+            String n = PersianText.norm(needle);
+            for (AccessibilityNodeInfo x : all) {
+                String t = PersianText.norm(nodeText(x));
+                if (!t.isEmpty() && t.equals(n)) return x;
+            }
+        }
+        return null;
     }
 
     private AccessibilityNodeInfo findAny(AccessibilityNodeInfo root, String... needles) {
@@ -190,7 +220,7 @@ public class SnappAccessibilityService extends AccessibilityService {
     private void retry(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 700); }
     private void retryFast(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 450); }
     private void retrySlow(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 1000); }
-    private void finish(){ SnappBridge.clear(); active=null; stage=0; }
+    private void finish(){ SnappBridge.clear(); active=null; stage=0; originConfirmed=false; }
     private void fail(String msg){ SnappBridge.status(msg + "\nصفحه دیده‌شده: " + lastSnapshot); finish(); }
     @Override public void onInterrupt() { }
 }

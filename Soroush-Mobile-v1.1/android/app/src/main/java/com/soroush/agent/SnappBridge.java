@@ -15,15 +15,15 @@ public final class SnappBridge {
     public static void clear(){ pending.set(null); }
     public static void status(String s){ if(listener!=null) listener.onStatus(s); }
 
+    public static boolean openSnapp(Context c){
+        String[] pkgs={"cab.snapp.passenger","cab.snapp.passenger.play"};
+        for(String p:pkgs){ Intent i=c.getPackageManager().getLaunchIntentForPackage(p); if(i!=null){i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(i); return true;} }
+        status("اپ Snapp روی این گوشی پیدا نشد."); return false;
+    }
+
     public static boolean launch(Context c, AgentCommand command) {
         pending.set(command);
-        String[] pkgs = {"cab.snapp.passenger", "cab.snapp.passenger.play"};
-        for (String p : pkgs) {
-            Intent i = c.getPackageManager().getLaunchIntentForPackage(p);
-            if (i != null) { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(i); status("Snapp باز شد؛ در حال اجرای فرمان…"); return true; }
-        }
-        status("اپ Snapp روی این گوشی پیدا نشد.");
-        pending.set(null);
-        return false;
+        if(openSnapp(c)){ status("Snapp باز شد؛ در حال اجرای فرمان…"); return true; }
+        pending.set(null); return false;
     }
 }

@@ -1,0 +1,11 @@
+Soroush Mobile - Android hotfix v1.2
+
+اصلاحات:
+- دکمه افزودن موقعیت در صفحه اصلی
+- نمایش وضعیت فعال/غیرفعال Accessibility برای Snapp
+- دکمه باز کردن Snapp
+- نمایش وضعیت سفر
+- اصلاح اتوماسیون برای صفحه «تأیید مبدأ» Snapp قبل از انتخاب مقصد
+- حفظ Saved Places و چت
+
+نکته: این بسته همان نام پوشه Soroush-Mobile-v1.1 را نگه می‌دارد تا workflow فعلی GitHub با مسیر Soroush-Mobile-v1.1/android بدون تغییر کار کند.
