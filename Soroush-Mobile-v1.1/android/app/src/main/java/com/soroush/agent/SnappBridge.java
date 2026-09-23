@@ -17,13 +17,20 @@ public final class SnappBridge {
 
     public static boolean openSnapp(Context c){
         String[] pkgs={"cab.snapp.passenger","cab.snapp.passenger.play"};
-        for(String p:pkgs){ Intent i=c.getPackageManager().getLaunchIntentForPackage(p); if(i!=null){i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(i); return true;} }
+        for(String p:pkgs){ Intent i=c.getPackageManager().getLaunchIntentForPackage(p); if(i!=null){i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT); c.startActivity(i); return true;} }
         status("اپ Snapp روی این گوشی پیدا نشد."); return false;
     }
 
     public static boolean launch(Context c, AgentCommand command) {
+        // Always replace the previous command so repeated rides begin from a clean state.
         pending.set(command);
-        if(openSnapp(c)){ status("Snapp باز شد؛ در حال اجرای فرمان…"); return true; }
+        if(openSnapp(c)){
+            status("Snapp باز شد؛ در حال اجرای فرمان…");
+            // Launching an already-running Snapp instance does not always emit a fresh
+            // accessibility event. Kick the service explicitly as well.
+            SnappAccessibilityService.kickPending();
+            return true;
+        }
         pending.set(null); return false;
     }
 }
