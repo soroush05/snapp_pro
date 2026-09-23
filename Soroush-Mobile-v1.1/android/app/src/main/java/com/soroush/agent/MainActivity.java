@@ -112,7 +112,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
 
     private void handleWizard(String raw){
         if("rideDest".equals(wizard)){wizard=null; resolveDestination(raw);return;}
-        if("missingPlaceAddress".equals(wizard)){ wizard=null; String title=pendingRideDestination; pendingRideDestination=null; askRide(title,raw); return; }
+        if("missingPlaceAddress".equals(wizard)){ acceptAddressForMissingPlace(raw); return; }
         if("city".equals(wizard)){addCity=raw.trim();wizard="title";say("چه عنوانی براش ذخیره کنم؟");return;}
         if("title".equals(wizard)){addTitle=raw.trim();wizard="address";say("آدرس «"+addTitle+"» رو در «"+addCity+"» بفرست.");return;}
         if("address".equals(wizard)){
