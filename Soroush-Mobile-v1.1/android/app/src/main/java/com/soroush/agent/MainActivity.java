@@ -19,7 +19,8 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private SavedPlaceRepository repo;
     private String pendingRideDestination=null;
     private AgentCommand pendingSensitive=null;
-    private String wizard=null, addCity=null, addTitle=null;
+    private String wizard=null, addCity=null, addTitle=null, addRawAddress=null;
+    private static final int REQ_MAP_PICKER=4401;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -100,16 +101,46 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
 
     private void parseRide(String raw){ String dest=extractDestination(raw); if(dest.isEmpty()){wizard="rideDest"; say("کجا می‌خوای بری؟"); return;} resolveDestination(dest); }
     private String extractDestination(String s){ String n=PersianText.norm(s); String[] markers={"میخوام برم پیش ","می خوام برم پیش ","برم پیش ","بریم پیش ","به خونه ","به خانه ","به منزل "," به ","برم ","بریم "}; for(String m:markers){int i=n.lastIndexOf(PersianText.norm(m));if(i>=0){String x=n.substring(i+PersianText.norm(m).length()).trim();x=x.replaceAll("(لطفا|لطفاً)$","").trim();if(!x.isEmpty())return x;}} return ""; }
-    private void resolveDestination(String dest){ SavedPlaceRepository.Match m=repo.findPersonal(dest); if(m!=null){ askRide(m.title,m.address); return; } String core=SavedPlaceRepository.stripRelationWords(dest); pendingRideDestination=core; wizard="missingPlaceAddress"; say("موقعیتی با عنوان «"+core+"» ذخیره نشده. اگر منظورت یک جای مشخصه، آدرسش رو بده تا برای همین سفر استفاده کنم؛ یا بگو «لغو»."); }
-    private void acceptAddressForMissingPlace(String address){ askRide(pendingRideDestination,address); pendingRideDestination=null; wizard=null; }
-    private void askRide(String title,String address){ pendingSensitive=new AgentCommand(AgentCommand.Type.REQUEST_RIDE,"CURRENT",address); say("مقصد «"+title+"» پیدا شد:\n"+address+"\nاز موقعیت فعلی درخواست Snapp بدم؟ بگو «تأیید»."); }
+    private void resolveDestination(String dest){ SavedPlaceRepository.Match m=repo.findPersonal(dest); if(m!=null){ askRide(m.title,m.address,m.searchAddress,m.lat,m.lon); return; } String core=SavedPlaceRepository.stripRelationWords(dest); pendingRideDestination=core; wizard="missingPlaceAddress"; say("موقعیتی با عنوان «"+core+"» ذخیره نشده. اگر منظورت یک جای مشخصه، آدرسش رو بده تا برای همین سفر استفاده کنم؛ یا بگو «لغو»."); }
+    private void acceptAddressForMissingPlace(String address){ askRide(pendingRideDestination,address,address,Double.NaN,Double.NaN); pendingRideDestination=null; wizard=null; }
+    private void askRide(String title,String address,String searchAddress,double lat,double lon){
+        String q=(searchAddress==null||searchAddress.trim().isEmpty())?address:searchAddress;
+        pendingSensitive=new AgentCommand(AgentCommand.Type.REQUEST_RIDE,"CURRENT",q,lat,lon);
+        String point=(!Double.isNaN(lat)&&!Double.isNaN(lon))?"\nنقطه نقشه ذخیره شده ✓":"";
+        say("مقصد «"+title+"» پیدا شد:\n"+address+point+"\nاز موقعیت فعلی درخواست Snapp بدم؟ بگو «تأیید».");
+    }
 
     private void handleWizard(String raw){
         if("rideDest".equals(wizard)){wizard=null; resolveDestination(raw);return;}
         if("missingPlaceAddress".equals(wizard)){ wizard=null; String title=pendingRideDestination; pendingRideDestination=null; askRide(title,raw); return; }
         if("city".equals(wizard)){addCity=raw.trim();wizard="title";say("چه عنوانی براش ذخیره کنم؟");return;}
         if("title".equals(wizard)){addTitle=raw.trim();wizard="address";say("آدرس «"+addTitle+"» رو در «"+addCity+"» بفرست.");return;}
-        if("address".equals(wizard)){String full=addCity+" "+raw.trim();repo.save(addTitle,full);refreshPlaces();wizard=null;say("«"+addTitle+"» ذخیره شد.");addCity=addTitle=null;}
+        if("address".equals(wizard)){
+            addRawAddress=raw.trim();
+            String full=addCity+" "+addRawAddress;
+            wizard="map";
+            say("آدرس را روی نقشه باز می‌کنم. پین را روی نقطه دقیق بگذار و ثبت کن.");
+            Intent i=new Intent(this,MapPickerActivity.class); i.putExtra("query",full); startActivityForResult(i,REQ_MAP_PICKER);
+            return;
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=REQ_MAP_PICKER) return;
+        if(resultCode==RESULT_OK && data!=null){
+            double lat=data.getDoubleExtra("lat",Double.NaN);
+            double lon=data.getDoubleExtra("lon",Double.NaN);
+            String canonical=data.getStringExtra("canonicalAddress");
+            String shown=addCity+" "+(addRawAddress==null?"":addRawAddress);
+            repo.save(addTitle,shown,canonical,lat,lon);
+            refreshPlaces();
+            say("«"+addTitle+"» با نقطه دقیق نقشه ذخیره شد.\n"+canonical);
+            wizard=null; addCity=addTitle=addRawAddress=null;
+        }else{
+            wizard="address";
+            say("ثبت نقشه انجام نشد. آدرس را دوباره بفرست یا فرایند را لغو کن.");
+        }
     }
 
     @Override public void onStatus(final String text){ runOnUiThread(()->{ say(text); if(text.contains("درخواست خودرو")||text.contains("راننده")||text.contains("سفر")) tripStatus.setText("وضعیت سفر: "+text.replace('\n',' ')); }); }
