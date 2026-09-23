@@ -9,12 +9,25 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.*;
 
 public class SnappAccessibilityService extends AccessibilityService {
+    private static volatile SnappAccessibilityService instance;
     private final Handler h = new Handler(Looper.getMainLooper());
     private AgentCommand active;
     private int stage = 0;
     private boolean originConfirmed = false;
+    private boolean rideServiceOpened = false;
+    private boolean currentLocationAttempted = false;
     private long startedAt = 0;
     private String lastSnapshot = "";
+
+    @Override protected void onServiceConnected() {
+        super.onServiceConnected();
+        instance=this;
+    }
+
+    public static void kickPending(){
+        SnappAccessibilityService s=instance;
+        if(s!=null){ s.h.removeCallbacks(s.stepper); s.h.postDelayed(s.stepper,900); }
+    }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
@@ -22,7 +35,7 @@ public class SnappAccessibilityService extends AccessibilityService {
         if (!pkg.startsWith("cab.snapp.passenger")) return;
         AgentCommand p = SnappBridge.getPending();
         if (p == null) return;
-        if (active != p) { active = p; stage = 0; originConfirmed = false; startedAt = System.currentTimeMillis(); }
+        if (active != p) { active = p; stage = 0; originConfirmed = false; rideServiceOpened=false; currentLocationAttempted=false; startedAt = System.currentTimeMillis(); }
         h.removeCallbacks(stepper);
         h.postDelayed(stepper, 350);
     }
@@ -30,7 +43,9 @@ public class SnappAccessibilityService extends AccessibilityService {
     private final Runnable stepper = new Runnable() { @Override public void run() { process(); } };
 
     private void process() {
-        if (active == null) return;
+        AgentCommand pending=SnappBridge.getPending();
+        if(pending==null) return;
+        if(active!=pending){ active=pending; stage=0; originConfirmed=false; rideServiceOpened=false; currentLocationAttempted=false; startedAt=System.currentTimeMillis(); }
         if (System.currentTimeMillis() - startedAt > 45000) {
             fail("برای جلوگیری از کلیک اشتباه، عملیات Snapp متوقف شد؛ رابط مورد انتظار پیدا نشد.");
             return;
@@ -50,33 +65,50 @@ public class SnappAccessibilityService extends AccessibilityService {
 
     private boolean requestRide(AccessibilityNodeInfo root) {
         if (stage == 0) {
-            // Snapp may first open on the Super App home screen. Enter the ride service
-            // explicitly before looking for the origin/destination flow. We only match
-            // an exact service label to avoid clicking the global search bar or other
-            // text containing the word Snapp.
-            AccessibilityNodeInfo rideService = findExactAny(root, "اسنپ", "اسنپ خودرو", "تاکسی اینترنتی");
-            if (rideService != null && click(rideService)) {
-                SnappBridge.status("سرویس اسنپ باز شد؛ در حال آماده‌سازی سفر…");
-                retrySlow(); return true;
+            // First recognize ride-flow controls. Do this BEFORE looking for the home
+            // tile; the word "اسنپ" can remain visible inside the ride module and
+            // repeatedly clicking it used to restart/stall subsequent requests.
+            AccessibilityNodeInfo destination = findAny(root, "انتخاب مقصد", "مقصد کجاست", "مقصد", "کجا می روید", "کجا می‌روید", "کجا میرید", "کجا می‌رید", "کجا؟");
+            AccessibilityNodeInfo edit = firstEditable(root);
+            AccessibilityNodeInfo confirmOrigin = findAny(root, "تایید مبدا", "تأیید مبدا", "تایید مبدأ", "تأیید مبدأ", "ثبت مبدا", "ثبت مبدأ");
+
+            if (confirmOrigin != null) {
+                // Try to recenter Snapp on the phone's current location before confirming.
+                // If this text is not exposed by Snapp accessibility we do not perform a
+                // blind coordinate click; we fall back to its visible origin pin.
+                if (!currentLocationAttempted && "CURRENT".equals(active.origin)) {
+                    currentLocationAttempted=true;
+                    AccessibilityNodeInfo current = findAny(root, "موقعیت فعلی", "مکان فعلی", "لوکیشن فعلی", "موقعیت من", "مکان من");
+                    if(current!=null && click(current)){
+                        SnappBridge.status("Snapp روی موقعیت فعلی متمرکز شد؛ در حال تأیید مبدأ…");
+                        retrySlow(); return true;
+                    }
+                }
+                if (click(confirmOrigin)) {
+                    originConfirmed=true;
+                    SnappBridge.status("مبدأ در Snapp تأیید شد؛ در حال رفتن به مقصد…");
+                    retrySlow(); return true;
+                }
             }
 
-            // Snapp often opens on the origin confirmation screen next.
-            AccessibilityNodeInfo confirmOrigin = findAny(root, "تایید مبدا", "تأیید مبدا", "تایید مبدأ", "تأیید مبدأ", "ثبت مبدا", "ثبت مبدأ");
-            if (confirmOrigin != null && click(confirmOrigin)) {
-                originConfirmed=true;
-                SnappBridge.status("مبدأ فعلی در Snapp تأیید شد؛ در حال رفتن به مقصد…");
-                retrySlow(); return true;
+            if (destination != null && click(destination)) { stage=1; SnappBridge.status("صفحه انتخاب مقصد باز شد."); retryFast(); return true; }
+            if (edit != null && (rideServiceOpened || originConfirmed)) { stage=1; retryFast(); return true; }
+
+            // Only enter the Super App ride tile once for this command.
+            if(!rideServiceOpened){
+                AccessibilityNodeInfo rideService = findExactAny(root, "اسنپ", "اسنپ خودرو", "تاکسی اینترنتی");
+                if (rideService != null && click(rideService)) {
+                    rideServiceOpened=true;
+                    SnappBridge.status("سرویس اسنپ باز شد؛ در حال آماده‌سازی سفر…");
+                    retrySlow(); return true;
+                }
             }
-            AccessibilityNodeInfo n = findAny(root, "انتخاب مقصد", "مقصد کجاست", "مقصد", "کجا می روید", "کجا می‌روید", "کجا میرید", "کجا می‌رید", "کجا؟");
-            if (n != null && click(n)) { stage=1; SnappBridge.status("صفحه انتخاب مقصد باز شد."); retryFast(); return true; }
-            AccessibilityNodeInfo edit = firstEditable(root);
-            if (edit != null) { stage=1; retryFast(); return true; }
             return false;
         }
         if (stage == 1) {
             AccessibilityNodeInfo edit = firstEditable(root);
             if (edit == null) return false;
-            if (setText(edit, active.destination)) { stage=2; SnappBridge.status("مقصد در Snapp وارد شد؛ در حال تطبیق نتیجه…"); retrySlow(); return true; }
+            if (setText(edit, active.destination)) { stage=2; SnappBridge.status(active.hasDestinationPoint()?"آدرسِ نقطه تأییدشده روی نقشه در Snapp وارد شد؛ در حال تطبیق نتیجه…":"مقصد در Snapp وارد شد؛ در حال تطبیق نتیجه…"); retrySlow(); return true; }
             return false;
         }
         if (stage == 2) {
@@ -90,7 +122,6 @@ public class SnappAccessibilityService extends AccessibilityService {
                 stage=4; SnappBridge.status("فرمان درخواست خودرو به Snapp ارسال شد. وضعیت سفر را در Snapp بررسی کن.");
                 finish(); return true;
             }
-            // Some versions show service cards first. Do not click a generic price/card blindly.
             return false;
         }
         return true;
@@ -162,16 +193,24 @@ public class SnappAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findBestAddressMatch(AccessibilityNodeInfo root, String address) {
+        String normalized=PersianText.norm(address);
         List<String> tokens = new ArrayList<>();
-        for (String t : PersianText.norm(address).split(" ")) if (t.length() >= 3) tokens.add(t);
-        AccessibilityNodeInfo best=null; int bestScore=0;
+        for (String t : normalized.split(" ")) if (t.length() >= 3) tokens.add(t);
+        AccessibilityNodeInfo best=null; int bestScore=0, secondScore=0;
         for (AccessibilityNodeInfo x : flatten(root)) {
             String text = PersianText.norm(nodeText(x));
             if (text.isEmpty()) continue;
             int score=0;
+            if(text.equals(normalized)) score+=10;
+            else if(text.contains(normalized) || normalized.contains(text)) score+=5;
             for (String t: tokens) if (text.contains(t)) score++;
-            if (score > bestScore && score >= Math.min(2, Math.max(1,tokens.size()))) { best=x; bestScore=score; }
+            if(score>bestScore){ secondScore=bestScore; bestScore=score; best=x; }
+            else if(score>secondScore){ secondScore=score; }
         }
+        int minimum=tokens.size()<=1?1:2;
+        // Do not silently choose between equally plausible addresses. A safe failure is
+        // preferable to sending the user to the wrong destination.
+        if(bestScore<minimum || (bestScore<10 && bestScore==secondScore)) return null;
         return best;
     }
 
@@ -220,7 +259,8 @@ public class SnappAccessibilityService extends AccessibilityService {
     private void retry(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 700); }
     private void retryFast(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 450); }
     private void retrySlow(){ h.removeCallbacks(stepper); h.postDelayed(stepper, 1000); }
-    private void finish(){ SnappBridge.clear(); active=null; stage=0; originConfirmed=false; }
+    private void finish(){ SnappBridge.clear(); active=null; stage=0; originConfirmed=false; rideServiceOpened=false; currentLocationAttempted=false; }
     private void fail(String msg){ SnappBridge.status(msg + "\nصفحه دیده‌شده: " + lastSnapshot); finish(); }
     @Override public void onInterrupt() { }
+    @Override public void onDestroy(){ if(instance==this) instance=null; super.onDestroy(); }
 }
