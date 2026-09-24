@@ -32,13 +32,14 @@ public class SnappAccessibilityService extends AccessibilityService {
     private boolean originConfirmedInSnapp=false,destinationConfirmedInSnapp=false,requestButtonClicked=false;
     private String originSelectedText="",destinationSelectedText="";
     private int originSelectionScore=0,destinationSelectionScore=0;
+    private boolean originCityMatched=false,destinationCityMatched=false;
     private int reconciliationAttempts=0;
     private Screen lastScreen=null;
     private String lastSnapshot="";
 
     @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;}
     public static void kickPending(){SnappAccessibilityService s=instance;if(s!=null){s.h.removeCallbacks(s.stepper);s.h.postDelayed(s.stepper,450);}}
-    public static void abortPending(){SnappAccessibilityService s=instance;if(s!=null){s.h.removeCallbacks(s.stepper);s.active=null;s.phase=Phase.SYNC;s.originQueryEntered=false;s.destinationQueryEntered=false;s.originResultSelected=false;s.destinationResultSelected=false;s.originSelectedText="";s.destinationSelectedText="";s.originSelectionScore=0;s.destinationSelectionScore=0;s.originConfirmClicked=false;s.destinationConfirmClicked=false;s.originConfirmedInSnapp=false;s.destinationConfirmedInSnapp=false;s.requestButtonClicked=false;s.reconciliationAttempts=0;s.unknownCycles=0;}}
+    public static void abortPending(){SnappAccessibilityService s=instance;if(s!=null){s.h.removeCallbacks(s.stepper);s.active=null;s.phase=Phase.SYNC;s.originQueryEntered=false;s.destinationQueryEntered=false;s.originResultSelected=false;s.destinationResultSelected=false;s.originSelectedText="";s.destinationSelectedText="";s.originSelectionScore=0;s.destinationSelectionScore=0;s.originCityMatched=false;s.destinationCityMatched=false;s.originConfirmClicked=false;s.destinationConfirmClicked=false;s.originConfirmedInSnapp=false;s.destinationConfirmedInSnapp=false;s.requestButtonClicked=false;s.reconciliationAttempts=0;s.unknownCycles=0;}}
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e){
         if(e==null||e.getPackageName()==null)return;
@@ -48,7 +49,7 @@ public class SnappAccessibilityService extends AccessibilityService {
         h.removeCallbacks(stepper);h.postDelayed(stepper,220);
     }
 
-    private void resetFor(AgentCommand p){active=p;phase=Phase.SYNC;startedAt=System.currentTimeMillis();phaseStartedAt=startedAt;unknownCycles=0;requestAttempts=0;backAttempts=0;reconciliationAttempts=0;originQueryEntered=false;destinationQueryEntered=false;originResultSelected=false;destinationResultSelected=false;originConfirmClicked=false;destinationConfirmClicked=false;originConfirmedInSnapp=false;destinationConfirmedInSnapp=false;requestButtonClicked=false;originSelectedText="";destinationSelectedText="";originSelectionScore=0;destinationSelectionScore=0;lastScreen=null;}
+    private void resetFor(AgentCommand p){active=p;phase=Phase.SYNC;startedAt=System.currentTimeMillis();phaseStartedAt=startedAt;unknownCycles=0;requestAttempts=0;backAttempts=0;reconciliationAttempts=0;originQueryEntered=false;destinationQueryEntered=false;originResultSelected=false;destinationResultSelected=false;originConfirmClicked=false;destinationConfirmClicked=false;originConfirmedInSnapp=false;destinationConfirmedInSnapp=false;requestButtonClicked=false;originSelectedText="";destinationSelectedText="";originSelectionScore=0;destinationSelectionScore=0;originCityMatched=false;destinationCityMatched=false;lastScreen=null;}
     private void move(Phase p){phase=p;phaseStartedAt=System.currentTimeMillis();unknownCycles=0;}
     private final Runnable stepper=this::process;
 
@@ -58,7 +59,7 @@ public class SnappAccessibilityService extends AccessibilityService {
         if(System.currentTimeMillis()-startedAt>105000){fail("نتونستم Snapp رو در زمان مناسب به وضعیت قابل اطمینان برسونم؛ عملیات رو متوقف کردم.");return;}
         AccessibilityNodeInfo root=getRootInActiveWindow();if(root==null){retry(500);return;}
         lastSnapshot=snapshot(root);Screen screen=detect(root);
-        if(screen!=lastScreen){lastScreen=screen;SnappBridge.debug("TECH: screen="+screenLabel(screen)+" phase="+phase.name());}
+        if(screen!=lastScreen){lastScreen=screen;SnappBridge.debug("TECH: screen="+screenLabel(screen)+" phase="+phase.name());SnappBridge.debug("TECH: screenSnapshot="+lastSnapshot);}
         boolean consumed=false;
         if(active.type==AgentCommand.Type.REQUEST_RIDE)consumed=ride(root,screen);
         else if(active.type==AgentCommand.Type.CANCEL_RIDE)consumed=cancel(root);
@@ -101,17 +102,19 @@ public class SnappAccessibilityService extends AccessibilityService {
     private boolean reconcileRidePhase(AccessibilityNodeInfo root,Screen screen){
         if((phase==Phase.SEARCH_ORIGIN||phase==Phase.CONFIRM_ORIGIN) &&
            (screen==Screen.DEST_PICKER||screen==Screen.DEST_CONFIRM||screen==Screen.ROUTE_READY)){
-            if(originConfirmedInSnapp){
-                SnappBridge.debug("TECH: reconcile origin->destination after verified transition");
+            if(originConfirmedInSnapp||originResultSelected){
+                originConfirmedInSnapp=true;
+                SnappBridge.debug("TECH: reconcile origin->destination after session-owned origin selection");
                 move(Phase.SEARCH_DESTINATION);
                 return screen==Screen.ROUTE_READY?recoverDestinationFromRoute(root):searchLocation(root,screen,false);
             }
-            SnappBridge.debug("TECH: PHASE_SCREEN_MISMATCH phase="+phase+" screen="+screen+" originConfirmed=false; forcing origin recovery");
-            if(reconciliationAttempts++>4){fail("Snapp بدون تأیید قابل اثبات مبدأ وارد مرحله بعد شد. برای جلوگیری از استفاده از مبدأ اشتباه متوقف شدم.");return true;}
-            resetOriginSearchEvidence();
-            if(tryEditOrigin(root)){move(Phase.SEARCH_ORIGIN);retry(750);return true;}
-            if(backAttempts++<3){performGlobalAction(GLOBAL_ACTION_BACK);move(Phase.SEARCH_ORIGIN);retry(800);return true;}
-            fail("Snapp وارد مرحله مقصد شد ولی مبدأ این درخواست قابل اثبات نبود و نتونستم به ویرایش مبدأ برگردم.");return true;
+            // This is normally a stale Snapp destination screen. In 2.1.3 tryEditOrigin() plus the
+            // address-card fallback bounced ORIGIN_CONFIRM <-> DEST_CONFIRM forever. Back once to the
+            // origin map and use only strict origin search controls there.
+            SnappBridge.debug("TECH: STALE_DESTINATION_WHILE_SETTING_ORIGIN; returning to origin map once");
+            if(reconciliationAttempts++>3){fail("Snapp روی مرحله مقصد قبلی مونده و مبدأ جدید هنوز تنظیم نشده. بازیابی امن مبدأ انجام نشد.");return true;}
+            if(backAttempts++<4){performGlobalAction(GLOBAL_ACTION_BACK);move(Phase.SEARCH_ORIGIN);retry(900);return true;}
+            fail("نتونستم از مرحله مقصد قبلی به انتخاب مبدأ برگردم.");return true;
         }
 
         if((phase==Phase.SEARCH_DESTINATION||phase==Phase.CONFIRM_DESTINATION) && screen==Screen.ROUTE_READY){
@@ -123,7 +126,7 @@ public class SnappAccessibilityService extends AccessibilityService {
         if((phase==Phase.SEARCH_DESTINATION||phase==Phase.CONFIRM_DESTINATION) &&
            (screen==Screen.ORIGIN_PICKER||screen==Screen.ORIGIN_CONFIRM)){
             SnappBridge.debug("TECH: destination phase regressed to origin screen; re-establishing origin safely");
-            if(screen==Screen.ORIGIN_CONFIRM&&originResultSelected&&confirmationCompatible(root,expectedOrigin(),originSelectedText,active.originCity,originSelectionScore)){
+            if(screen==Screen.ORIGIN_CONFIRM&&originResultSelected&&confirmationCompatible(root,expectedOrigin(),originSelectedText,active.originCity,originSelectionScore,originCityMatched)){
                 move(Phase.CONFIRM_ORIGIN);return confirmOrigin(root,screen);
             }
             resetOriginSearchEvidence();move(Phase.SEARCH_ORIGIN);return searchLocation(root,screen,true);
@@ -138,12 +141,15 @@ public class SnappAccessibilityService extends AccessibilityService {
     }
 
     private void observeMilestones(Screen screen){
-        if(originConfirmClicked && (screen==Screen.DEST_PICKER||screen==Screen.DEST_CONFIRM||screen==Screen.ROUTE_READY)){
-            if(!originConfirmedInSnapp)SnappBridge.debug("TECH: origin confirmation transition verified by observed screen="+screen);
+        // Snapp versions differ: some show a separate confirm map, others advance immediately after
+        // a concrete search result is selected. A result selected by THIS session is sufficient proof
+        // when Snapp advances to the next role; a stale screen transition is not.
+        if((originConfirmClicked||originResultSelected) && (screen==Screen.DEST_PICKER||screen==Screen.DEST_CONFIRM||screen==Screen.ROUTE_READY)){
+            if(!originConfirmedInSnapp)SnappBridge.debug("TECH: origin transition verified; source="+(originConfirmClicked?"confirm-click":"result-selection")+" screen="+screen);
             originConfirmedInSnapp=true;
         }
-        if(destinationConfirmClicked && screen==Screen.ROUTE_READY){
-            if(!destinationConfirmedInSnapp)SnappBridge.debug("TECH: destination confirmation transition verified by ROUTE_READY");
+        if((destinationConfirmClicked||destinationResultSelected) && screen==Screen.ROUTE_READY){
+            if(!destinationConfirmedInSnapp)SnappBridge.debug("TECH: destination transition verified; source="+(destinationConfirmClicked?"confirm-click":"result-selection"));
             destinationConfirmedInSnapp=true;
         }
     }
@@ -156,8 +162,8 @@ public class SnappAccessibilityService extends AccessibilityService {
         fail("صفحه مسیر باز شد، اما نتونستم با اطمینان مقصد رو دوباره بررسی کنم.");return true;
     }
 
-    private void resetOriginSearchEvidence(){originQueryEntered=false;originResultSelected=false;originConfirmClicked=false;originConfirmedInSnapp=false;originSelectedText="";originSelectionScore=0;}
-    private void resetDestinationSearchEvidence(){destinationQueryEntered=false;destinationResultSelected=false;destinationConfirmClicked=false;destinationConfirmedInSnapp=false;destinationSelectedText="";destinationSelectionScore=0;}
+    private void resetOriginSearchEvidence(){originQueryEntered=false;originResultSelected=false;originConfirmClicked=false;originConfirmedInSnapp=false;originSelectedText="";originSelectionScore=0;originCityMatched=false;}
+    private void resetDestinationSearchEvidence(){destinationQueryEntered=false;destinationResultSelected=false;destinationConfirmClicked=false;destinationConfirmedInSnapp=false;destinationSelectedText="";destinationSelectionScore=0;destinationCityMatched=false;}
     private String expectedOrigin(){return active.originExpected==null||active.originExpected.trim().isEmpty()?active.origin:active.originExpected;}
     private String expectedDestination(){return active.destinationExpected==null||active.destinationExpected.trim().isEmpty()?active.destination:active.destinationExpected;}
 
@@ -167,13 +173,17 @@ public class SnappAccessibilityService extends AccessibilityService {
         if(screen==Screen.ORIGIN_PICKER){move(Phase.SEARCH_ORIGIN);return searchLocation(root,screen,true);}
         if(screen==Screen.ORIGIN_CONFIRM){
             if(active.usesCurrentOrigin()){move(Phase.CONFIRM_ORIGIN);return confirmOrigin(root,screen);}
-            if(openLocationEditor(root,true)){move(Phase.SEARCH_ORIGIN);retry(650);return true;}
-            if(backAttempts++<2){performGlobalAction(GLOBAL_ACTION_BACK);retry(700);return true;}
-            fail("صفحه مبدأ رو پیدا کردم، اما کنترل قابل اطمینانی برای تغییر مبدأ پیدا نشد.");return true;
+            move(Phase.SEARCH_ORIGIN);return searchLocation(root,screen,true);
         }
-        if(screen==Screen.DEST_PICKER||screen==Screen.DEST_CONFIRM||screen==Screen.ROUTE_READY){
-            if(tryEditOrigin(root)){move(Phase.SEARCH_ORIGIN);retry(700);return true;}
-            if(backAttempts++<3){performGlobalAction(GLOBAL_ACTION_BACK);retry(750);return true;}
+        if(screen==Screen.DEST_PICKER||screen==Screen.DEST_CONFIRM){
+            // Destination map belongs to an old/incomplete flow. Back is deterministic here and,
+            // unlike clicking generic cards, cannot silently accept the current marker.
+            if(backAttempts++<4){performGlobalAction(GLOBAL_ACTION_BACK);retry(850);return true;}
+            fail("Snapp روی مقصد قبلی مونده و نتونستم به صفحه مبدأ برگردم.");return true;
+        }
+        if(screen==Screen.ROUTE_READY){
+            if(tryEditOrigin(root)){move(Phase.SEARCH_ORIGIN);retry(750);return true;}
+            if(backAttempts++<3){performGlobalAction(GLOBAL_ACTION_BACK);retry(850);return true;}
             fail("Snapp روی مسیر قبلی مونده و نتونستم با اطمینان به انتخاب مبدأ برگردم.");return true;
         }
         // Search/result overlays are often exposed as UNKNOWN. If an editable is visible, use it.
@@ -195,19 +205,24 @@ public class SnappAccessibilityService extends AccessibilityService {
             if(cur!=null&&click(cur)){originResultSelected=true;originSelectedText="CURRENT";move(Phase.CONFIRM_ORIGIN);retry(750);return true;}
         }
 
-        // Never treat arrival on a confirmation map as proof of a successful search. In alpha2 merely
-        // typing text could set *QueryEntered and the current/default marker was then confirmed by mistake.
-        if(origin&&screen==Screen.ORIGIN_CONFIRM){
-            if(originResultSelected){move(Phase.CONFIRM_ORIGIN);return confirmOrigin(root,screen);}
-            if(openLocationEditor(root,true)){retry(650);return true;}
-            if(System.currentTimeMillis()-phaseStartedAt>7000){fail("صفحه تأیید مبدأ باز شد، اما Snapp هیچ نتیجه‌ای از مبدأ درخواستی رو انتخاب نکرده. برای جلوگیری از تأیید نقطه اشتباه ادامه ندادم.");return true;}
-            return false;
+        // A confirmation map can still expose an editable search field. Prefer it directly. If no
+        // editable is exposed, open the role-specific search control only; never click a generic
+        // address card because on current Snapp builds that can CONFIRM the current marker.
+        if(origin&&screen==Screen.ORIGIN_CONFIRM&&!originResultSelected){
+            AccessibilityNodeInfo directEdit=bestEditable(root,"مبدا","مبدأ","جستجو","از کجا");
+            if(directEdit==null){
+                if(openLocationEditor(root,true)){retry(700);return true;}
+                if(System.currentTimeMillis()-phaseStartedAt>9000){SnappBridge.debug("TECH: ORIGIN_SEARCH_CONTROL_NOT_FOUND snapshot="+lastSnapshot);fail("صفحه مبدأ بازه، اما کنترل مطمئنی برای جستجوی مبدأ پیدا نکردم. هیچ نقطه‌ای تأیید نشد.");return true;}
+                return false;
+            }
         }
-        if(!origin&&screen==Screen.DEST_CONFIRM){
-            if(destinationResultSelected){move(Phase.CONFIRM_DESTINATION);return confirmDestination(root,screen);}
-            if(openLocationEditor(root,false)){retry(650);return true;}
-            if(System.currentTimeMillis()-phaseStartedAt>7000){fail("صفحه تأیید مقصد باز شد، اما Snapp هیچ نتیجه‌ای از مقصد درخواستی رو انتخاب نکرده. برای جلوگیری از تأیید نقطه اشتباه ادامه ندادم.");return true;}
-            return false;
+        if(!origin&&screen==Screen.DEST_CONFIRM&&!destinationResultSelected){
+            AccessibilityNodeInfo directEdit=bestEditable(root,"مقصد","جستجو","کجا");
+            if(directEdit==null){
+                if(openLocationEditor(root,false)){retry(700);return true;}
+                if(System.currentTimeMillis()-phaseStartedAt>9000){SnappBridge.debug("TECH: DEST_SEARCH_CONTROL_NOT_FOUND snapshot="+lastSnapshot);fail("صفحه مقصد بازه، اما کنترل مطمئنی برای جستجوی مقصد پیدا نکردم. هیچ نقطه‌ای تأیید نشد.");return true;}
+                return false;
+            }
         }
 
         AccessibilityNodeInfo edit=bestEditable(root,origin?new String[]{"مبدا","مبدأ","جستجو","از کجا"}:new String[]{"مقصد","جستجو","کجا"});
@@ -226,8 +241,8 @@ public class SnappAccessibilityService extends AccessibilityService {
             if(match!=null){
                 String chosen=match.text;
                 if(click(match.node)){
-                    if(origin){originResultSelected=true;originSelectedText=chosen;originSelectionScore=match.score;}else{destinationResultSelected=true;destinationSelectedText=chosen;destinationSelectionScore=match.score;}
-                    SnappBridge.debug("TECH: "+(origin?"origin":"destination")+" result score="+match.score+" margin="+match.margin+" text="+chosen);
+                    if(origin){originResultSelected=true;originSelectedText=chosen;originSelectionScore=match.score;originCityMatched=match.cityStatus==CityStatus.MATCH;}else{destinationResultSelected=true;destinationSelectedText=chosen;destinationSelectionScore=match.score;destinationCityMatched=match.cityStatus==CityStatus.MATCH;}
+                    SnappBridge.debug("TECH: "+(origin?"origin":"destination")+" result score="+match.score+" margin="+match.margin+" localMatches="+match.localMatches+" city="+match.cityStatus+" text="+chosen);
                     SnappBridge.debug((origin?"مبدأ":"مقصد")+" از یک نتیجه مشخص Snapp انتخاب شد؛ منتظر صفحه تأیید هستم.");
                     move(origin?Phase.CONFIRM_ORIGIN:Phase.CONFIRM_DESTINATION);retry(900);return true;
                 }
@@ -256,7 +271,7 @@ public class SnappAccessibilityService extends AccessibilityService {
             return false;
         }
         String expected=active.originExpected==null||active.originExpected.trim().isEmpty()?active.origin:active.originExpected;
-        if(!active.usesCurrentOrigin()&&!confirmationCompatible(root,expected,originSelectedText,active.originCity,originSelectionScore)){
+        if(!active.usesCurrentOrigin()&&!confirmationCompatible(root,expected,originSelectedText,active.originCity,originSelectionScore,originCityMatched)){
             fail("صفحه تأیید مبدأ با نتیجه‌ای که انتخاب کردم سازگاری کافی نداره؛ برای جلوگیری از تأیید نقطه اشتباه متوقف شدم.");return true;
         }
         AccessibilityNodeInfo c=findAny(root,"تایید مبدا","تأیید مبدا","تایید مبدأ","تأیید مبدأ");
@@ -276,7 +291,7 @@ public class SnappAccessibilityService extends AccessibilityService {
             return false;
         }
         String expected=active.destinationExpected==null||active.destinationExpected.trim().isEmpty()?active.destination:active.destinationExpected;
-        if(!confirmationCompatible(root,expected,destinationSelectedText,active.destinationCity,destinationSelectionScore)){
+        if(!confirmationCompatible(root,expected,destinationSelectedText,active.destinationCity,destinationSelectionScore,destinationCityMatched)){
             fail("صفحه تأیید مقصد با نتیجه‌ای که انتخاب کردم سازگاری کافی نداره؛ برای جلوگیری از تأیید نقطه اشتباه متوقف شدم.");return true;
         }
         AccessibilityNodeInfo c=findAny(root,"تایید مقصد","تأیید مقصد");
@@ -302,12 +317,42 @@ public class SnappAccessibilityService extends AccessibilityService {
     }
 
     private boolean openLocationEditor(AccessibilityNodeInfo root,boolean origin){
-        // Prefer explicit edit/select controls. A generic "جستجو" may belong to the Super App search bar
-        // and caused alpha2 to enter text in the wrong control.
-        AccessibilityNodeInfo direct=findAny(root,origin?new String[]{"تغییر مبدأ","تغییر مبدا","انتخاب مبدأ","انتخاب مبدا","ویرایش مبدأ","ویرایش مبدا"}:new String[]{"تغییر مقصد","انتخاب مقصد","ویرایش مقصد"});
-        if(direct!=null&&click(direct))return true;
-        AccessibilityNodeInfo panel=findBottomAddressPanel(root,origin);if(panel!=null&&click(panel))return true;
-        AccessibilityNodeInfo search=findLowerScreenControl(root,"جستجو");return search!=null&&click(search);
+        // Strict navigation only. 2.1.3 used a bottom-address-card fallback; on the current Snapp UI
+        // tapping that card can advance from ORIGIN_CONFIRM to DEST_CONFIRM and therefore skips origin
+        // search entirely. We now click only controls whose own text/hint identifies the intended role.
+        String[] roleControls=origin
+                ?new String[]{"تغییر مبدأ","تغییر مبدا","انتخاب مبدأ","انتخاب مبدا","ویرایش مبدأ","ویرایش مبدا","جستجوی مبدأ","جستجوی مبدا","مبدأ","مبدا","از کجا"}
+                :new String[]{"تغییر مقصد","انتخاب مقصد","ویرایش مقصد","جستجوی مقصد","مقصد","کجا می روید","کجا می‌روید"};
+        AccessibilityNodeInfo direct=findSafeRoleControl(root,origin,roleControls);
+        if(direct!=null&&click(direct)){SnappBridge.debug("TECH: opened "+(origin?"origin":"destination")+" editor via role control="+nodeText(direct));return true;}
+        AccessibilityNodeInfo search=findRoleAwareSearchControl(root,origin);
+        if(search!=null&&click(search)){SnappBridge.debug("TECH: opened "+(origin?"origin":"destination")+" editor via search control="+nodeText(search));return true;}
+        return false;
+    }
+
+    private AccessibilityNodeInfo findSafeRoleControl(AccessibilityNodeInfo root,boolean origin,String... needles){
+        for(AccessibilityNodeInfo n:flatten(root)){
+            String t=PersianText.norm(nodeText(n));if(t.isEmpty())continue;
+            if(t.contains("تایید")||t.contains("تأیید"))continue;
+            boolean match=false;for(String needle:needles){String q=PersianText.norm(needle);if(t.equals(q)||t.contains(q)){match=true;break;}}
+            if(!match)continue;AccessibilityNodeInfo c=clickableAncestor(n);if(c==null)continue;
+            String ct=PersianText.norm(aggregateText(c));
+            if(ct.contains("تایید مبدا")||ct.contains("تأیید مبدأ")||ct.contains("تایید مقصد")||ct.contains("تأیید مقصد"))continue;
+            if(ct.length()>220)continue; // avoid a large container/list ancestor
+            return c;
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findRoleAwareSearchControl(AccessibilityNodeInfo root,boolean origin){
+        for(AccessibilityNodeInfo n:flatten(root)){
+            String t=PersianText.norm(nodeText(n));if(!(t.contains("جستجو")||t.contains("search")))continue;
+            if(t.contains("تایید")||t.contains("تأیید"))continue;
+            String parent=t;AccessibilityNodeInfo p=n.getParent();if(p!=null)parent+=" "+PersianText.norm(nodeText(p));
+            boolean role=origin?(parent.contains("مبدا")||parent.contains("مبدأ")||parent.contains("از کجا")):(parent.contains("مقصد")||parent.contains("کجا"));
+            if(!role)continue;AccessibilityNodeInfo c=clickableAncestor(n);if(c!=null)return c;
+        }
+        return null;
     }
 
     private AccessibilityNodeInfo findLowerScreenControl(AccessibilityNodeInfo root,String needle){
@@ -387,36 +432,65 @@ public class SnappAccessibilityService extends AccessibilityService {
     private boolean pay(AccessibilityNodeInfo root){AccessibilityNodeInfo p=findAny(root,"روش پرداخت","پرداخت سفر","پرداخت هزینه");if(p!=null&&click(p)){retry(700);return true;}AccessibilityNodeInfo w=findAny(root,"کیف پول","کیف‌پول","اعتبار اسنپ");if(w!=null&&click(w)){retry(700);return true;}AccessibilityNodeInfo c=findAny(root,"تایید پرداخت","تأیید پرداخت","پرداخت کن");if(c!=null&&click(c)){SnappBridge.event(SnappEvent.PAYMENT_SENT,"فرمان پرداخت به Snapp ارسال شد.");finish();return true;}return false;}
 
     private AddressMatch findBestAddressMatch(AccessibilityNodeInfo root,String query,String expected,String expectedCity){
-        AccessibilityNodeInfo best=null;String bestText="";int bestScore=-999,second=-999;
+        AccessibilityNodeInfo best=null;String bestText="";int bestScore=-999,second=-999,bestLocal=0;CityStatus bestCity=CityStatus.UNKNOWN;
         Set<AccessibilityNodeInfo> seen=Collections.newSetFromMap(new IdentityHashMap<AccessibilityNodeInfo,Boolean>());
         int expectedTokens=Math.max(PersianText.addressTokens(expected).size(),PersianText.addressTokens(query).size());
         for(AccessibilityNodeInfo x:flatten(root)){
             if(x.isEditable())continue;AccessibilityNodeInfo clickable=clickableAncestor(x);if(clickable==null||seen.contains(clickable))continue;seen.add(clickable);
-            String t=aggregateText(clickable);if(t.isEmpty()||isControlLike(t))continue;
+            String t=aggregateText(clickable);if(t.isEmpty()||isControlLike(t)||t.length()>360)continue;
             CityStatus cityStatus=cityStatus(expectedCity,t);
             if(cityStatus==CityStatus.CONFLICT){SnappBridge.debug("TECH: CITY_HARD_REJECT expected="+expectedCity+" candidate="+t);continue;}
+            int localMatches=countLocalMatches(expected,t);
             int s=Math.max(PersianText.addressSimilarity(expected,t),PersianText.addressSimilarity(query,t));
-            int candidateTokens=PersianText.addressTokens(t).size();if(candidateTokens>=2)s+=6;
-            if(cityStatus==CityStatus.MATCH)s+=30;
-            if(s>bestScore){second=bestScore;bestScore=s;best=clickable;bestText=t;}else if(s>second)second=s;
+            int candidateTokens=PersianText.addressTokens(t).size();if(candidateTokens>=2)s+=6;if(localMatches>=2)s+=10;if(localMatches>=3)s+=8;
+            if(cityStatus==CityStatus.MATCH)s+=34;
+            // If the expected city is known but the result does not expose a city, demand multiple
+            // local address tokens. This keeps a similarly named Tehran result from winning.
+            if(!cityCore(expectedCity).isEmpty()&&cityStatus==CityStatus.UNKNOWN&&localMatches<2)continue;
+            if(s>bestScore){second=bestScore;bestScore=s;best=clickable;bestText=t;bestLocal=localMatches;bestCity=cityStatus;}else if(s>second)second=s;
         }
-        int min=expectedTokens<=1?62:48;if(best==null||bestScore<min)return null;
-        int margin=second<=-900?99:bestScore-second;if(margin<10&&bestScore<96)return null;
-        return new AddressMatch(best,bestText,bestScore,margin);
+        int min=expectedTokens<=1?68:50;if(bestCity==CityStatus.UNKNOWN)min=Math.max(min,66);
+        if(best==null||bestScore<min)return null;
+        int margin=second<=-900?99:bestScore-second;if(margin<9&&bestScore<100)return null;
+        return new AddressMatch(best,bestText,bestScore,margin,bestLocal,bestCity);
     }
 
-    private boolean confirmationCompatible(AccessibilityNodeInfo root,String expected,String selected,String city,int selectionScore){
-        AccessibilityNodeInfo panel=findBottomAddressPanel(root,false);String visible=panel==null?"":aggregateText(panel);
-        if(visible.isEmpty()){SnappBridge.debug("TECH: confirmation panel text unavailable; selectionScore="+selectionScore);return selectionScore>=72;}
-        CityStatus cs=cityStatus(city,visible);
-        if(cs==CityStatus.CONFLICT){SnappBridge.debug("TECH: CONFIRM_CITY_MISMATCH expectedCity="+city+" visible="+visible);return false;}
-        int a=PersianText.addressSimilarity(expected,visible),b=PersianText.addressSimilarity(selected,visible);
-        if(cs==CityStatus.MATCH){a+=30;b+=30;}
-        int best=Math.max(a,b);SnappBridge.debug("TECH: confirmation verify city="+cs+" textScore="+best+" selectionScore="+selectionScore+" visible="+visible);
-        if(best>=22)return true;
-        // A genuinely address-like but conflicting confirmation card is evidence against the selection.
-        if(PersianText.addressTokens(visible).size()>=2&&best<10)return false;
-        return selectionScore>=84;
+    private int countLocalMatches(String expected,String candidate){
+        List<String> e=PersianText.addressTokens(expected),c=PersianText.addressTokens(candidate);int matches=0;
+        for(String x:e){String nx=PersianText.norm(x);if(nx.equals("همدان")||nx.equals("تهران")||nx.equals("ایران")||nx.equals("مرکزی"))continue;double best=0;for(String y:c)best=Math.max(best,PersianText.tokenSimilarity(x,y));if(best>=.82)matches++;}
+        return matches;
+    }
+
+    private boolean confirmationCompatible(AccessibilityNodeInfo root,String expected,String selected,String city,int selectionScore,boolean selectedCityMatched){
+        // The concrete search result clicked by this session is the primary evidence. Snapp's map
+        // confirmation screen also contains unrelated saved/suggested addresses, so choosing the
+        // longest bottom card (2.1.3) could compare against the wrong item.
+        AccessibilityNodeInfo panel=findConfirmationPanel(root,expected,selected,city);
+        String visible=panel==null?"":aggregateText(panel);
+        if(!visible.isEmpty()){
+            CityStatus cs=cityStatus(city,visible);
+            if(cs==CityStatus.CONFLICT){SnappBridge.debug("TECH: CONFIRM_CITY_MISMATCH expectedCity="+city+" visible="+visible);return false;}
+            int best=Math.max(PersianText.addressSimilarity(expected,visible),PersianText.addressSimilarity(selected,visible));
+            if(cs==CityStatus.MATCH)best+=30;
+            SnappBridge.debug("TECH: confirmation verify city="+cs+" textScore="+best+" selectionScore="+selectionScore+" visible="+visible);
+            if(best>=24)return true;
+        }
+        // If the confirmation card is not exposed reliably, accept only a strong session-owned
+        // result; explicit city match lowers the required textual threshold.
+        int threshold=selectedCityMatched?58:82;
+        SnappBridge.debug("TECH: confirmation panel unavailable/weak; trusting selected result only if score >= "+threshold+" actual="+selectionScore+" cityMatched="+selectedCityMatched);
+        return selectionScore>=threshold;
+    }
+
+    private AccessibilityNodeInfo findConfirmationPanel(AccessibilityNodeInfo root,String expected,String selected,String city){
+        AccessibilityNodeInfo best=null;int bestScore=-999;Set<AccessibilityNodeInfo> seen=Collections.newSetFromMap(new IdentityHashMap<AccessibilityNodeInfo,Boolean>());
+        for(AccessibilityNodeInfo n:flatten(root)){
+            AccessibilityNodeInfo c=clickableAncestor(n);if(c==null||seen.contains(c))continue;seen.add(c);String t=aggregateText(c);
+            if(t.length()<4||t.length()>320||isControlLike(t))continue;CityStatus cs=cityStatus(city,t);if(cs==CityStatus.CONFLICT)continue;
+            int score=Math.max(PersianText.addressSimilarity(expected,t),PersianText.addressSimilarity(selected,t));if(cs==CityStatus.MATCH)score+=30;
+            score+=Math.min(20,countLocalMatches(expected,t)*6);if(score>bestScore){bestScore=score;best=c;}
+        }
+        return bestScore>=18?best:null;
     }
 
     private enum CityStatus { MATCH, CONFLICT, UNKNOWN }
@@ -446,7 +520,7 @@ public class SnappAccessibilityService extends AccessibilityService {
     private boolean genericAdminWord(String x){return x.equals("مرکزی")||x.equals("بخش")||x.equals("شهر")||x.equals("استان")||x.equals("شهرستان");}
     private boolean containsWholeToken(String text,String token){return (" "+PersianText.norm(text)+" ").contains(" "+PersianText.norm(token)+" ");}
 
-    private static final class AddressMatch{final AccessibilityNodeInfo node;final String text;final int score,margin;AddressMatch(AccessibilityNodeInfo n,String t,int s,int m){node=n;text=t;score=s;margin=m;}}
+    private static final class AddressMatch{final AccessibilityNodeInfo node;final String text;final int score,margin,localMatches;final CityStatus cityStatus;AddressMatch(AccessibilityNodeInfo n,String t,int s,int m,int l,CityStatus c){node=n;text=t;score=s;margin=m;localMatches=l;cityStatus=c;}}
 
     private boolean isControlLike(String text){
         String n=PersianText.norm(text);
@@ -471,7 +545,7 @@ public class SnappAccessibilityService extends AccessibilityService {
     private String nodeText(AccessibilityNodeInfo n){StringBuilder s=new StringBuilder();if(n.getText()!=null)s.append(n.getText()).append(' ');if(n.getContentDescription()!=null)s.append(n.getContentDescription()).append(' ');if(n.getHintText()!=null)s.append(n.getHintText());return s.toString().trim();}
     private String snapshot(AccessibilityNodeInfo root){StringBuilder s=new StringBuilder();int c=0;for(AccessibilityNodeInfo n:flatten(root)){String t=nodeText(n);if(!t.isEmpty()){if(c++>70)break;s.append(t).append(" | ");}}return s.toString();}
     private void retry(long ms){h.removeCallbacks(stepper);h.postDelayed(stepper,ms);}
-    private void finish(){String id=active==null?null:active.sessionId;SnappBridge.clear(id);active=null;phase=Phase.SYNC;unknownCycles=0;originQueryEntered=false;destinationQueryEntered=false;originResultSelected=false;destinationResultSelected=false;originConfirmClicked=false;destinationConfirmClicked=false;originConfirmedInSnapp=false;destinationConfirmedInSnapp=false;requestButtonClicked=false;reconciliationAttempts=0;originSelectedText="";destinationSelectedText="";originSelectionScore=0;destinationSelectionScore=0;}
+    private void finish(){String id=active==null?null:active.sessionId;SnappBridge.clear(id);active=null;phase=Phase.SYNC;unknownCycles=0;originQueryEntered=false;destinationQueryEntered=false;originResultSelected=false;destinationResultSelected=false;originConfirmClicked=false;destinationConfirmClicked=false;originConfirmedInSnapp=false;destinationConfirmedInSnapp=false;requestButtonClicked=false;reconciliationAttempts=0;originSelectedText="";destinationSelectedText="";originSelectionScore=0;destinationSelectionScore=0;originCityMatched=false;destinationCityMatched=false;}
     private void fail(String msg){SnappBridge.event(SnappEvent.SAFE_FAILURE,msg);finish();}
     @Override public void onInterrupt(){}
     @Override public void onDestroy(){if(instance==this)instance=null;super.onDestroy();}
