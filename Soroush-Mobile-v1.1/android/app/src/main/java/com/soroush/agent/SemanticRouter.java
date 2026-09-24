@@ -21,7 +21,7 @@ public final class SemanticRouter {
     public SemanticRouter(){train();buildCentroids();}
 
     public IntentEnvelope understand(String raw,ConversationContext ctx){
-        String text=PersianText.norm(raw);
+        String text=semanticNormalize(raw);
         if(text.isEmpty())return new IntentEnvelope(SemanticIntent.UNKNOWN,0,IntentEnvelope.Decision.UNKNOWN,raw,"","","","","",Collections.emptyMap());
 
         String taskText=stripLeadingSocial(text);
@@ -111,6 +111,7 @@ public final class SemanticRouter {
         boolean negKeep=(hasStem(ws,"نگه")&&hasStem(ws,"ندار","نکن","نخوام","نمیخوام"))||((hasStem(ws,"نخوام","نمیخوام","نمی خوام")||n.contains("دیگه نمیخوام"))&&hasStem(ws,"داشت","داشته","بمون"))||hasStem(ws,"فراموش","حذف","پاک","بردار")||n.contains("یادت نمونه")||n.contains("یاد نمونه");
         boolean edit=hasStem(ws,"عوض","تغییر","اصلاح","ویرایش","ادیت","درست","اشتباه","غلط");
         boolean ride=hasStem(ws,"اسنپ","ماشین","تاکسی","خودرو","سفر","راننده");
+        boolean request=hasStem(ws,"درخواست","بگیر")||(ride&&hasStem(ws,"میخوام","لازم"))||n.contains("ماشین میخوام")||n.contains("اسنپ میخوام");
         boolean cancel=hasStem(ws,"لغو","کنسل","بیخیال","ولش","منصرف","متوقف","رها")||n.contains("ادامه نده")||n.contains("ادامه ندیم")||n.contains("ادامه ندین");
         boolean map=hasStem(ws,"نقشه","پین")&&(hasStem(ws,"انتخاب","مشخص","بزن","دستی","باز"));
         boolean search=hasStem(ws,"پیدا","کجاست","کجاس","جستجو","بگرد");
@@ -120,12 +121,38 @@ public final class SemanticRouter {
         if(negKeep&&saved){boost(s,SemanticIntent.DELETE_SAVED_PLACE,0.24);demote(s,SemanticIntent.ADD_SAVED_PLACE,0.10);}
         else if(keep&&(saved||n.contains("برای بعد")||n.contains("دم دست"))){boost(s,SemanticIntent.ADD_SAVED_PLACE,0.20);demote(s,SemanticIntent.DELETE_SAVED_PLACE,0.08);}
         if(edit&&saved){boost(s,SemanticIntent.EDIT_SAVED_PLACE,0.16);}
-        if(cancel){if(ride)boost(s,SemanticIntent.CANCEL_RIDE,0.20);else boost(s,SemanticIntent.CANCEL_FLOW,0.22);}
+        if(cancel){
+            if(ride){boost(s,SemanticIntent.CANCEL_RIDE,0.24);demote(s,SemanticIntent.REQUEST_RIDE,0.12);}
+            else boost(s,SemanticIntent.CANCEL_FLOW,0.22);
+        }else{
+            // A ride noun by itself means a request/ride context, never cancellation. This prevents
+            // short utterances such as "اسنپ" from competing with CANCEL_RIDE merely because
+            // cancellation training examples also mention Snapp/ride nouns.
+            if(ride){boost(s,SemanticIntent.REQUEST_RIDE,0.24);demote(s,SemanticIntent.CANCEL_RIDE,0.20);}
+            if(request){boost(s,SemanticIntent.REQUEST_RIDE,0.18);demote(s,SemanticIntent.CANCEL_RIDE,0.14);}
+        }
         if(map)boost(s,SemanticIntent.SHOW_MAP,0.18);
         if(search&&location)boost(s,SemanticIntent.SEARCH_LOCATION,0.16);
         if(origin&&edit)boost(s,SemanticIntent.CHANGE_ORIGIN,0.16);
         if(destination&&edit)boost(s,SemanticIntent.CHANGE_DESTINATION,0.16);
         if(ctx!=null&&edit&&ctx.lastEntityRole!=ConversationContext.EntityRole.NONE)boost(s,SemanticIntent.CORRECT_PREVIOUS,0.13);
+    }
+
+    private static final String[] CONTROL_VOCAB={
+            "سلام","درود","اسنپ","درخواست","ماشین","تاکسی","سفر","راننده","لغو","کنسل","مبدا","مبدأ","مقصد",
+            "نقشه","تایید","تأیید","ذخیره","موقعیت","لوکیشن","آدرس","ادرس","ویرایش","اصلاح","بیخیال","منصرف"};
+
+    /** Generic typo tolerance for short control/intent vocabulary. Location names are deliberately
+     * excluded so a fuzzy language correction can never rewrite an address or POI. */
+    private String semanticNormalize(String raw){
+        String n=PersianText.norm(raw);if(n.isEmpty())return n;
+        String[] parts=n.split(" ");
+        for(int i=0;i<parts.length;i++){
+            String w=parts[i];if(w.length()<3)continue;String best=w;int bestD=99;
+            for(String v0:CONTROL_VOCAB){String v=PersianText.norm(v0);int max=Math.max(w.length(),v.length());if(Math.abs(w.length()-v.length())>2)continue;int d=PersianText.editDistance(w,v);int allowed=max>=6?2:1;if(d<=allowed&&d<bestD){bestD=d;best=v;}}
+            if(bestD<99)parts[i]=best;
+        }
+        return String.join(" ",parts);
     }
 
     private boolean hasStem(List<String> ws,String...stems){
@@ -153,7 +180,8 @@ public final class SemanticRouter {
         add(SemanticIntent.HELP,"چه کارهایی میتونی بکنی","کمکم کن","راهنمایی میخوام","چطوری ازت استفاده کنم","چه قابلیت هایی داری");
         add(SemanticIntent.REQUEST_RIDE,
                 "برام ماشین بگیر","یه اسنپ میخوام","تاکسی لازم دارم","میخوام برم دانشگاه","از خونه به دانشگاه برام ماشین بگیر",
-                "میشه برام خودرو بگیری","میخوام برم پیش علی","یه ماشین میخوام برای رفتن","برام سفر بگیر","میخوام جایی برم");
+                "میشه برام خودرو بگیری","میخوام برم پیش علی","یه ماشین میخوام برای رفتن","برام سفر بگیر","میخوام جایی برم",
+                "اسنپ","درخواست","درخواست سفر","ماشین");
         add(SemanticIntent.CHANGE_ORIGIN,
                 "مبدا رو عوض کن","از دانشگاه بگیر","نه از خونه نگیر از محل کار بگیر","مبدا اشتباهه","شروع سفر از یه جای دیگه باشه",
                 "جایی که ماشین میاد رو تغییر بده","از اینجا نگیر","محل سوار شدن رو عوض کن");

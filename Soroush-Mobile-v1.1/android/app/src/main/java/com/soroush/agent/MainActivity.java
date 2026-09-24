@@ -338,21 +338,30 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private String displayLoc(LocationRef l){if(l==null)return "-";String extra=l.canonicalAddress.trim().isEmpty()?"":" — "+l.canonicalAddress;return l.label+extra;}
     private static String s(String x){return x==null?"":x;}
 
-    private void showDiag(){new android.app.AlertDialog.Builder(this).setTitle("Diagnostics").setMessage(diag.dump()).setPositiveButton("باشه",null).show();}
+    private void showDiag(){
+        final String raw=diag.dump();
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Diagnostics")
+                .setMessage(raw)
+                .setPositiveButton("کپی Diagnostics",(d,w)->{copyText("Soroush diagnostics",raw);Toast.makeText(this,"Diagnostics کپی شد.",Toast.LENGTH_SHORT).show();})
+                .setNegativeButton("بستن",null)
+                .show();
+    }
 
     private void showTestTools(){
-        final String[] items={"کپی کل مکالمه","کپی گزارش کامل تست","شروع تست جدید / پاک کردن Test Log","نمایش Diagnostics فعلی"};
+        final String[] items={"کپی کل مکالمه","کپی Diagnostics","کپی گزارش کامل تست","شروع تست جدید / پاک کردن Test Log","نمایش Diagnostics فعلی"};
         new android.app.AlertDialog.Builder(this).setTitle("Test & Diagnostics").setItems(items,(dialog,which)->{
             if(which==0){copyText("Soroush conversation",report.conversationDump());Toast.makeText(this,"کل مکالمه کپی شد.",Toast.LENGTH_SHORT).show();}
-            else if(which==1){String full=report.fullReport(appVersion(),buildCurrentStateSummary(),diag.dump());copyText("Soroush test report",full);Toast.makeText(this,"گزارش کامل تست کپی شد.",Toast.LENGTH_SHORT).show();}
-            else if(which==2){new android.app.AlertDialog.Builder(this).setTitle("شروع تست جدید").setMessage("Test Log قبلی پاک شود؟ مکالمه روی صفحه پاک نمی‌شود، اما گزارش جدید از این لحظه شروع می‌شود.").setPositiveButton("پاک کن",(d,w)->{report.clear();diag.clear();Toast.makeText(this,"Test Log جدید شروع شد.",Toast.LENGTH_SHORT).show();}).setNegativeButton("نه",null).show();}
+            else if(which==1){copyText("Soroush diagnostics",diag.dump());Toast.makeText(this,"Diagnostics کپی شد.",Toast.LENGTH_SHORT).show();}
+            else if(which==2){String full=report.fullReport(appVersion(),buildCurrentStateSummary(),diag.dump());copyText("Soroush test report",full);Toast.makeText(this,"گزارش کامل تست کپی شد.",Toast.LENGTH_SHORT).show();}
+            else if(which==3){new android.app.AlertDialog.Builder(this).setTitle("شروع تست جدید").setMessage("Test Log قبلی پاک شود؟ مکالمه روی صفحه پاک نمی‌شود، اما گزارش جدید از این لحظه شروع می‌شود.").setPositiveButton("پاک کن",(d,w)->{report.clear();diag.clear();Toast.makeText(this,"Test Log جدید شروع شد.",Toast.LENGTH_SHORT).show();}).setNegativeButton("نه",null).show();}
             else showDiag();
         }).setNegativeButton("بستن",null).show();
     }
 
     private void copyText(String label,String value){ClipboardManager cb=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(cb!=null)cb.setPrimaryClip(ClipData.newPlainText(label,value==null?"":value));}
 
-    private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception e){return "2.1.1-alpha4-testreport";}}
+    private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception e){return "2.1.3-alpha4-snappfix";}}
 
     private String buildCurrentStateSummary(){
         StringBuilder s=new StringBuilder();
