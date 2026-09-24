@@ -2,20 +2,13 @@ package com.soroush.agent;
 
 public final class AgentCommand {
     public enum Type { REQUEST_RIDE, CANCEL_RIDE, PAY_WALLET }
+    public final String sessionId;
     public final Type type;
     public final String origin;
     public final String destination;
-    public final double destinationLat;
-    public final double destinationLon;
-
-    public AgentCommand(Type type, String origin, String destination) {
-        this(type, origin, destination, Double.NaN, Double.NaN);
-    }
-
-    public AgentCommand(Type type, String origin, String destination, double destinationLat, double destinationLon) {
-        this.type=type; this.origin=origin; this.destination=destination;
-        this.destinationLat=destinationLat; this.destinationLon=destinationLon;
-    }
-
-    public boolean hasDestinationPoint(){ return !Double.isNaN(destinationLat) && !Double.isNaN(destinationLon); }
+    public final double originLat,originLon,destinationLat,destinationLon;
+    public final long createdAt=System.currentTimeMillis();
+    public AgentCommand(String sessionId,Type type,String origin,String destination,double oLat,double oLon,double dLat,double dLon){this.sessionId=sessionId;this.type=type;this.origin=origin;this.destination=destination;originLat=oLat;originLon=oLon;destinationLat=dLat;destinationLon=dLon;}
+    public AgentCommand(Type type,String origin,String destination){this("manual-"+System.currentTimeMillis(),type,origin,destination,Double.NaN,Double.NaN,Double.NaN,Double.NaN);}
+    public boolean usesCurrentOrigin(){return "CURRENT".equals(origin);}
 }
