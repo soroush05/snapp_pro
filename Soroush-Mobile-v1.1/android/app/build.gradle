@@ -8,8 +8,8 @@ android {
         applicationId 'com.soroush.agent'
         minSdk 26
         targetSdk 35
-        versionCode 12
-        versionName '2.1.3-alpha4-snappfix'
+        versionCode 13
+        versionName '2.1.4-alpha4-snapp-exec-rebuild'
     }
 
     signingConfigs {
