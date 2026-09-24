@@ -69,6 +69,7 @@ public class MapPickerActivity extends Activity {
                 if(parts.length>=2 && !normalized.contains("شهید ")){
                     StringBuilder v=new StringBuilder();for(int i=0;i<parts.length;i++){if(i==parts.length-1)v.append("شهید ");v.append(parts[i]).append(' ');}queries.add(v.toString().trim());
                 }
+                if(normalized.contains("شهید ")) queries.add(normalized.replace("شهید ", "").replaceAll("\\s+"," ").trim());
                 if(!c.trim().isEmpty()&&!normalized.startsWith(PersianText.norm(c)+" "))queries.add(c+" "+q);
                 // Progressive fallback keeps parent context instead of jumping to unrelated cities.
                 if(parts.length>3){StringBuilder parent=new StringBuilder();for(int i=0;i<parts.length-1;i++)parent.append(parts[i]).append(' ');queries.add(parent.toString().trim());}
@@ -120,11 +121,11 @@ public class MapPickerActivity extends Activity {
     private void showCandidates(List<Candidate> list){
         candidatesBox.removeAllViews();
         if(list.isEmpty()){status.setText("آدرس دقیق پیدا نشد. برای جلوگیری از انتخاب اشتباه، نقطه را دستی روی نقشه انتخاب کن.");return;}
-        status.setText("چند نتیجه پیدا شد. گزینه اول فقط پیشنهاد است؛ قبل از ثبت، خود نقطه را روی نقشه بررسی کن و در صورت نیاز پین را جابه‌جا کن.");
+        status.setText("چند نتیجه پیدا شد. هیچ‌کدام خودکار انتخاب نمی‌شود؛ یکی را بزن یا نقطه را دستی روی نقشه مشخص کن.");
         for(int i=0;i<Math.min(3,list.size());i++){
             Candidate c=list.get(i);Button b=new Button(this);b.setText((i+1)+". "+shorten(c.display));b.setAllCaps(false);b.setOnClickListener(v->selectCandidate(c));candidatesBox.addView(b);
         }
-        selectCandidate(list.get(0));
+        save.setEnabled(false);
     }
 
     private String shorten(String s){return s.length()>105?s.substring(0,102)+"…":s;}

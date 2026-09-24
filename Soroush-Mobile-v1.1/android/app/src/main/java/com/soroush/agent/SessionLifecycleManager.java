@@ -6,7 +6,9 @@ public final class SessionLifecycleManager {
     public void reconcile(ConversationContext ctx){
         if(ctx==null||ctx.ride==null||ctx.ride.terminal())return;
         long age=System.currentTimeMillis()-ctx.ride.updatedAt;
-        if(age>EXPIRE_MS){ctx.ride.state=RideSession.State.EXPIRED;ctx.ride=null;ctx.clearPending();}
-        else if(age>ABANDON_MS && ctx.ride.state!=RideSession.State.EXECUTING){ctx.ride.state=RideSession.State.ABANDONED;ctx.ride=null;ctx.clearPending();}
+        if(age>EXPIRE_MS){ctx.ride.state=RideSession.State.EXPIRED;SnappBridge.abortCurrent();ctx.ride=null;ctx.clearPending();return;}
+        if(age>ABANDON_MS&&ctx.ride.state!=RideSession.State.EXECUTING){ctx.ride.state=RideSession.State.ABANDONED;SnappBridge.abortCurrent();ctx.ride=null;ctx.clearPending();return;}
+        // A remembered EXECUTING state without a matching pending command is stale. Do not let it block a new goal.
+        if(ctx.ride.state==RideSession.State.EXECUTING){AgentCommand p=SnappBridge.getPending();if(p==null||!ctx.ride.id.equals(p.sessionId)){ctx.ride.state=RideSession.State.ABANDONED;ctx.ride=null;ctx.clearPending();}}
     }
 }

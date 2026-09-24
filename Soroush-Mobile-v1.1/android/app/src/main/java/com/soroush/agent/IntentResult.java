@@ -1,7 +1,21 @@
 package com.soroush.agent;
 
 public final class IntentResult {
-    public enum Intent { REQUEST_RIDE, ADD_PLACE, EDIT_PLACE, CANCEL_FLOW, CANCEL_RIDE, CONFIRM, REJECT, SHOW_MAP, ANSWER, UNKNOWN }
+    public enum Intent {
+        GREETING,
+        REQUEST_RIDE,
+        ADD_PLACE,
+        EDIT_PLACE,
+        CHANGE_ORIGIN,
+        CHANGE_DESTINATION,
+        CANCEL_FLOW,
+        CANCEL_RIDE,
+        CONFIRM,
+        REJECT,
+        SHOW_MAP,
+        ANSWER,
+        UNKNOWN
+    }
     public final Intent intent;
     public final String origin;
     public final String destination;
