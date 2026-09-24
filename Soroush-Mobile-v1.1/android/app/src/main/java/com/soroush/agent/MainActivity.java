@@ -3,6 +3,9 @@ package com.soroush.agent;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -19,7 +22,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private final SemanticPipeline semantic=new SemanticPipeline();
     private final GoalManager goals=new GoalManager();
     private final SessionLifecycleManager lifecycle=new SessionLifecycleManager();
-    private SavedPlaceRepository repo;private LocationResolver locations;private DiagnosticStore diag;
+    private SavedPlaceRepository repo;private LocationResolver locations;private DiagnosticStore diag;private TestReportStore report;
     private LinearLayout chat;private ScrollView scroll;private EditText input;private TextView connection,activityStatus;
     private String mapPurpose="",tempTitle="",tempCity="",tempAddress="",deleteTarget="";
     private double tempLat=Double.NaN,tempLon=Double.NaN;
@@ -28,7 +31,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private static final int REQ_MAP=4401;
 
     @Override public void onCreate(Bundle b){
-        super.onCreate(b);repo=new SavedPlaceRepository(this);locations=new LocationResolver(repo);diag=new DiagnosticStore(this);SnappBridge.setListener(this);buildUi();
+        super.onCreate(b);repo=new SavedPlaceRepository(this);locations=new LocationResolver(repo);diag=new DiagnosticStore(this);report=new TestReportStore(this);SnappBridge.setListener(this);buildUi();
         addAgent("سلام! طبیعی بگو چی می‌خوای. اگر معنی یا موقعیتی مبهم باشه، قبل از انجام کار ازت می‌پرسم.");
     }
     @Override protected void onResume(){super.onResume();lifecycle.reconcile(ctx);refreshConnection();}
@@ -38,6 +41,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);root.setBackgroundColor(Color.rgb(248,248,250));
         LinearLayout head=new LinearLayout(this);head.setPadding(20,14,20,10);head.setGravity(Gravity.CENTER_VERTICAL);head.setOrientation(LinearLayout.HORIZONTAL);
         TextView title=text("Soroush Agent",22,true);head.addView(title,new LinearLayout.LayoutParams(0,-2,1));
+        Button testBtn=new Button(this);testBtn.setText("تست");testBtn.setOnClickListener(v->showTestTools());head.addView(testBtn);
         Button diagBtn=new Button(this);diagBtn.setText("وضعیت");diagBtn.setOnClickListener(v->showDiag());head.addView(diagBtn);root.addView(head);
         connection=text("",12,false);connection.setPadding(20,0,20,4);root.addView(connection);refreshConnection();
         activityStatus=text("",12,false);activityStatus.setPadding(20,0,20,6);activityStatus.setTextColor(Color.rgb(95,95,100));activityStatus.setVisibility(View.GONE);root.addView(activityStatus);
@@ -51,7 +55,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private void addAgent(String s){addBubble(s,false);}
     private void addBubble(String s,boolean user){
         TextView b=text(s,16,false);b.setPadding(18,12,18,12);b.setTextColor(user?Color.WHITE:Color.rgb(25,25,28));b.setBackgroundColor(user?Color.rgb(74,104,210):Color.WHITE);b.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        LinearLayout row=new LinearLayout(this);row.setGravity(user?Gravity.RIGHT:Gravity.LEFT);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-2,-2);bp.setMargins(user?70:0,5,user?0:70,5);row.addView(b,bp);chat.addView(row,new LinearLayout.LayoutParams(-1,-2));autoScroll();
+        LinearLayout row=new LinearLayout(this);row.setGravity(user?Gravity.RIGHT:Gravity.LEFT);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-2,-2);bp.setMargins(user?70:0,5,user?0:70,5);row.addView(b,bp);chat.addView(row,new LinearLayout.LayoutParams(-1,-2));if(report!=null)report.appendConversation(user?"USER":"SOROUSH",s);autoScroll();
     }
     private void autoScroll(){scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));}
     private void quickRow(String[] labels,Runnable[] actions){
@@ -62,6 +66,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private void handle(String raw){
         lifecycle.reconcile(ctx);IntentEnvelope e=semantic.understand(raw,ctx);ctx.lastIntent=e.intent;
         diag.put("intent",e.intent.name()+" "+String.format(Locale.ROOT,"%.2f",e.confidence)+" | "+e.topAlternatives());
+        if(report!=null)report.appendTrace("SEMANTIC",semanticTrace(raw,e));
 
         if(e.decision==IntentEnvelope.Decision.CLARIFY){clarifyMeaning(e);return;}
 
@@ -139,7 +144,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     }
 
     private void resolveRideLocation(String spec,boolean origin){
-        LocationDecision d=locations.resolve(spec,origin);diag.put(origin?"originDecision":"destinationDecision",d.kind.name()+" | "+d.query);
+        LocationDecision d=locations.resolve(spec,origin);diag.put(origin?"originDecision":"destinationDecision",d.kind.name()+" | "+d.query);if(report!=null)report.appendTrace("LOCATION",(origin?"role=ORIGIN":"role=DESTINATION")+"\ninput="+spec+"\ndecision="+d.kind.name()+"\nquery="+d.query+"\nsavedCandidates="+d.savedMatches.size());
         switch(d.kind){
             case CURRENT_LOCATION:setRideLocation(d.location,true);return;
             case RESOLVED_SAVED:setRideLocation(d.location,origin);return;
@@ -166,7 +171,7 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
         if(!p.confirmed||!p.hasPoint()){addAgent("این موقعیت از داده قدیمی/متنیه و نقطه دقیقش تأیید نشده. یک بار روی نقشه تأییدش کن.");openMap(p.searchAddress,p.city,origin?"rideOrigin":"rideDestination");return;}
         setRideLocation(p.toLocation(),origin);
     }
-    private void setRideLocation(LocationRef l,boolean origin){if(ctx.ride==null)return;if(origin){ctx.ride.origin=l;ctx.lastEntityRole=ConversationContext.EntityRole.ORIGIN;}else{ctx.ride.destination=l;ctx.lastEntityRole=ConversationContext.EntityRole.DESTINATION;}ctx.lastEntity=l.label;ctx.pending=ConversationContext.Pending.NONE;continueRide();}
+    private void setRideLocation(LocationRef l,boolean origin){if(ctx.ride==null)return;if(origin){ctx.ride.origin=l;ctx.lastEntityRole=ConversationContext.EntityRole.ORIGIN;}else{ctx.ride.destination=l;ctx.lastEntityRole=ConversationContext.EntityRole.DESTINATION;}ctx.lastEntity=l.label;ctx.pending=ConversationContext.Pending.NONE;if(report!=null)report.appendTrace("LOCATION_SELECTED",locationTrace(l,origin));continueRide();}
 
     private void changeOrigin(String value){
         if(ctx.ride==null||ctx.ride.terminal()){addAgent("درخواست سفر فعالی برای تغییر مبدأ ندارم. اگر سفر جدید می‌خوای همون رو بگو.");return;}
@@ -305,13 +310,14 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private void openMap(String q,String city,String purpose){openMap(q,city,purpose,Double.NaN,Double.NaN);}
     private void openMap(String q,String city,String purpose,double initialLat,double initialLon){
         mapPurpose=purpose;Intent i=new Intent(this,MapPickerActivity.class);i.putExtra("query",q==null?"":q);i.putExtra("city",city==null?"":city);i.putExtra("purpose",purpose);i.putExtra("initialLat",initialLat);i.putExtra("initialLon",initialLon);
-        try{startActivityForResult(i,REQ_MAP);}catch(Exception e){mapPurpose="";diag.put("mapError",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));addAgent("صفحه نقشه باز نشد. خطا در Diagnostics ثبت شد.");}
+        if(report!=null)report.appendTrace("MAP_OPEN","purpose="+purpose+"\nquery="+s(q)+"\ncity="+s(city)+"\ninitialLat="+initialLat+"\ninitialLon="+initialLon);
+        try{startActivityForResult(i,REQ_MAP);}catch(Exception e){mapPurpose="";diag.put("mapError",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));if(report!=null)report.appendTrace("MAP_ERROR",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));addAgent("صفحه نقشه باز نشد. خطا در Diagnostics ثبت شد.");}
     }
 
     @Override protected void onActivityResult(int req,int res,Intent data){
-        super.onActivityResult(req,res,data);if(req!=REQ_MAP)return;if(res!=RESULT_OK||data==null){mapPurpose="";return;}
+        super.onActivityResult(req,res,data);if(req!=REQ_MAP)return;if(res!=RESULT_OK||data==null){if(report!=null)report.appendTrace("MAP_RESULT","cancelled=true\npurpose="+mapPurpose);mapPurpose="";return;}
         double lat=data.getDoubleExtra("lat",Double.NaN),lon=data.getDoubleExtra("lon",Double.NaN);String ca=s(data.getStringExtra("canonicalAddress")),raw=s(data.getStringExtra("rawQuery")),returnedCity=s(data.getStringExtra("city")),source=s(data.getStringExtra("source"));long verifiedAt=data.getLongExtra("verifiedAt",System.currentTimeMillis());
-        String label=raw.trim().isEmpty()?"موقعیت انتخاب‌شده":raw.trim();LocationRef l=new LocationRef(label,raw,ca,returnedCity.isEmpty()?tempCity:returnedCity,lat,lon,LocationRef.Type.MANUAL_PIN,LocationRef.Confidence.CONFIRMED,true,source.isEmpty()?"USER_CONFIRMED_PIN":source,verifiedAt);
+        String label=raw.trim().isEmpty()?"موقعیت انتخاب‌شده":raw.trim();LocationRef l=new LocationRef(label,raw,ca,returnedCity.isEmpty()?tempCity:returnedCity,lat,lon,LocationRef.Type.MANUAL_PIN,LocationRef.Confidence.CONFIRMED,true,source.isEmpty()?"USER_CONFIRMED_PIN":source,verifiedAt);if(report!=null)report.appendTrace("MAP_RESULT","purpose="+mapPurpose+"\nlat="+lat+"\nlon="+lon+"\ncity="+returnedCity+"\ncanonicalAddress="+ca+"\nsource="+source+"\nconfirmed=true");
         if("rideOrigin".equals(mapPurpose))setRideLocation(l,true);
         else if("rideDestination".equals(mapPurpose))setRideLocation(l,false);
         else if("add".equals(mapPurpose)){
@@ -333,15 +339,52 @@ public class MainActivity extends Activity implements SnappBridge.Listener {
     private static String s(String x){return x==null?"":x;}
 
     private void showDiag(){new android.app.AlertDialog.Builder(this).setTitle("Diagnostics").setMessage(diag.dump()).setPositiveButton("باشه",null).show();}
+
+    private void showTestTools(){
+        final String[] items={"کپی کل مکالمه","کپی گزارش کامل تست","شروع تست جدید / پاک کردن Test Log","نمایش Diagnostics فعلی"};
+        new android.app.AlertDialog.Builder(this).setTitle("Test & Diagnostics").setItems(items,(dialog,which)->{
+            if(which==0){copyText("Soroush conversation",report.conversationDump());Toast.makeText(this,"کل مکالمه کپی شد.",Toast.LENGTH_SHORT).show();}
+            else if(which==1){String full=report.fullReport(appVersion(),buildCurrentStateSummary(),diag.dump());copyText("Soroush test report",full);Toast.makeText(this,"گزارش کامل تست کپی شد.",Toast.LENGTH_SHORT).show();}
+            else if(which==2){new android.app.AlertDialog.Builder(this).setTitle("شروع تست جدید").setMessage("Test Log قبلی پاک شود؟ مکالمه روی صفحه پاک نمی‌شود، اما گزارش جدید از این لحظه شروع می‌شود.").setPositiveButton("پاک کن",(d,w)->{report.clear();diag.clear();Toast.makeText(this,"Test Log جدید شروع شد.",Toast.LENGTH_SHORT).show();}).setNegativeButton("نه",null).show();}
+            else showDiag();
+        }).setNegativeButton("بستن",null).show();
+    }
+
+    private void copyText(String label,String value){ClipboardManager cb=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(cb!=null)cb.setPrimaryClip(ClipData.newPlainText(label,value==null?"":value));}
+
+    private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception e){return "2.1.1-alpha4-testreport";}}
+
+    private String buildCurrentStateSummary(){
+        StringBuilder s=new StringBuilder();
+        s.append("Goal: ").append(ctx.activeGoal).append('\n');
+        s.append("Pending: ").append(ctx.pending).append('\n');
+        s.append("Last intent: ").append(ctx.lastIntent).append('\n');
+        s.append("Last entity role: ").append(ctx.lastEntityRole).append('\n');
+        s.append("Last entity: ").append(ctx.lastEntity).append('\n');
+        s.append("Accessibility: ").append(isAccessibilityEnabled()?"ENABLED":"DISABLED").append('\n');
+        s.append("Map purpose: ").append(mapPurpose.isEmpty()?"-":mapPurpose).append('\n');
+        if(ctx.ride!=null){s.append("Ride session: ").append(ctx.ride.id).append('\n');s.append("Ride state: ").append(ctx.ride.state).append('\n');s.append("Origin: ").append(displayLoc(ctx.ride.origin)).append('\n');s.append("Destination: ").append(displayLoc(ctx.ride.destination)).append('\n');}
+        else s.append("Ride session: -\n");
+        return s.toString().trim();
+    }
+
+    private String semanticTrace(String raw,IntentEnvelope e){
+        return "input="+raw+"\nintent="+e.intent+"\nconfidence="+String.format(Locale.ROOT,"%.3f",e.confidence)+"\ndecision="+e.decision+"\norigin="+e.origin+"\ndestination="+e.destination+"\ntarget="+e.target+"\nvalue="+e.value+"\ncity="+e.city+"\nalternatives="+e.topAlternatives()+"\ncontextGoal="+ctx.activeGoal+"\ncontextPending="+ctx.pending;
+    }
+
+    private String locationTrace(LocationRef l,boolean origin){
+        if(l==null)return "role="+(origin?"ORIGIN":"DESTINATION")+"\nlocation=null";
+        return "role="+(origin?"ORIGIN":"DESTINATION")+"\nlabel="+l.label+"\ntype="+l.type+"\ncity="+l.city+"\ncanonicalAddress="+l.canonicalAddress+"\nlat="+l.lat+"\nlon="+l.lon+"\nsource="+l.source+"\nconfidence="+l.confidence+"\nconfirmed="+l.userConfirmed;
+    }
     private void refreshConnection(){boolean e=isAccessibilityEnabled();connection.setText(e?"Snapp access: فعال ✓":"Snapp access: غیرفعال — برای اجرا فعالش کن");connection.setTextColor(e?Color.rgb(20,125,60):Color.rgb(170,55,45));}
     private void setActivityStatus(String s){if(activityStatus==null)return;if(s==null||s.trim().isEmpty()){activityStatus.setText("");activityStatus.setVisibility(View.GONE);}else{activityStatus.setText(s);activityStatus.setVisibility(View.VISIBLE);}}
     private boolean isAccessibilityEnabled(){try{String enabled=Settings.Secure.getString(getContentResolver(),Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);if(enabled==null)return false;String flat=new ComponentName(this,SnappAccessibilityService.class).flattenToString();for(String x:enabled.split(":"))if(x.equalsIgnoreCase(flat))return true;}catch(Exception ignored){}return false;}
 
     @Override public void onEvent(SnappEvent event,String s){runOnUiThread(()->{
-        diag.put("snappEvent",(event==null?SnappEvent.INFO:event).name()+" | "+s);setActivityStatus("");
+        diag.put("snappEvent",(event==null?SnappEvent.INFO:event).name()+" | "+s);if(report!=null)report.appendTrace("SNAPP_EVENT",(event==null?SnappEvent.INFO:event).name()+"\n"+String.valueOf(s));setActivityStatus("");
         if(event==SnappEvent.RIDE_REQUEST_CONFIRMED&&ctx.ride!=null){ctx.ride.state=RideSession.State.COMPLETED;ctx.activeGoal=ConversationContext.Goal.NONE;ctx.clearPending();}
         else if(event==SnappEvent.SAFE_FAILURE){diag.put("error",s);if(ctx.ride!=null&&ctx.ride.state==RideSession.State.EXECUTING)ctx.ride.state=RideSession.State.FAILED;}
         addAgent(s);
     });}
-    @Override public void onDebug(String s){runOnUiThread(()->{diag.put("snapp",s);if(s!=null&&s.startsWith("TECH:"))return;setActivityStatus(s);});}
+    @Override public void onDebug(String s){runOnUiThread(()->{diag.put("snapp",s);if(report!=null)report.appendTrace("SNAPP_DEBUG",String.valueOf(s));if(s!=null&&s.startsWith("TECH:"))return;setActivityStatus(s);});}
 }

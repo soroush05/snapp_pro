@@ -8,6 +8,7 @@ public final class DiagnosticStore {
     private final SharedPreferences p;
     public DiagnosticStore(Context c){p=c.getSharedPreferences("diag",Context.MODE_PRIVATE);}
     public void put(String k,String v){p.edit().putString(k,v==null?"":v).apply();}
+    public void clear(){p.edit().clear().apply();}
     public String dump(){
         return "Semantic intent: "+p.getString("intent","-")+"\n"+
                 "Session: "+p.getString("session","-")+"\n"+
